@@ -1,0 +1,13 @@
+{
+    "apiVersion": "authorization.k8s.io/v1",
+    "kind": "SubjectAccessReview",
+    "spec": {
+        "resourceAttributes": {
+            "namespace": "sandbox",
+            "verb": "get",
+            "resource": "pods"
+        },
+        "user": "jane",
+        "groups": ["developers"]
+    }
+}
