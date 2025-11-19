@@ -26,6 +26,12 @@ AUTHORIZATION_RULES = {
 # Admin users who have full access
 ADMIN_USERS = ["admin", "system:masters"]
 
+# System namespaces where we defer to other authorizers
+SYSTEM_NAMESPACES = ["kube-system", "kube-public", "kube-node-lease"]
+
+# Resources we don't have an opinion on (defer to other authorizers)
+NO_OPINION_RESOURCES = ["secrets", "configmaps"]
+
 @app.route('/authorize', methods=['POST'])
 def authorize():
     """
@@ -62,6 +68,16 @@ def authorize():
         logger.info(f"Authorization request - User: {user}, Namespace: {namespace}, "
                    f"Verb: {verb}, Resource: {resource}")
         
+        # Defer to other authorizers for system namespaces
+        if namespace in SYSTEM_NAMESPACES:
+            logger.info(f"System namespace {namespace} - no opinion, deferring to other authorizers")
+            return create_response(None, f"Deferring authorization for system namespace '{namespace}'")
+        
+        # Defer to other authorizers for sensitive resources we don't want to handle
+        if resource in NO_OPINION_RESOURCES:
+            logger.info(f"Sensitive resource {resource} - no opinion, deferring to other authorizers")
+            return create_response(None, f"Deferring authorization for resource '{resource}'")
+        
         # Check if user is admin
         if user in ADMIN_USERS or any(g in ADMIN_USERS for g in groups):
             logger.info(f"Admin user {user} - allowing access")
@@ -93,15 +109,27 @@ def authorize():
         return create_response(False, f"Internal error: {str(e)}")
 
 def create_response(allowed, reason):
-    """Create a SubjectAccessReview response."""
-    return jsonify({
+    """
+    Create a SubjectAccessReview response.
+    
+    Args:
+        allowed: True (allow), False (deny), or None (no opinion)
+        reason: Human-readable reason for the decision
+    """
+    response = {
         "apiVersion": "authorization.k8s.io/v1",
         "kind": "SubjectAccessReview",
         "status": {
-            "allowed": allowed,
             "reason": reason
         }
-    })
+    }
+    
+    # If allowed is None, we have no opinion - omit the 'allowed' field
+    # This tells Kubernetes to consult other authorizers in the chain
+    if allowed is not None:
+        response["status"]["allowed"] = allowed
+    
+    return jsonify(response)
 
 @app.route('/health', methods=['GET'])
 def health():
